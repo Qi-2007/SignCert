@@ -77,6 +77,8 @@ pnpm exec wrangler secret put PKI_MASTER_KEY
 
 如果希望使用本地初始化脚本而非 Web 页面，原流程仍可用：设置 `ROOT_PASSPHRASE` 后执行 `pnpm bootstrap https://你的域名`，执行数据库迁移并导入 `pki/seed.sql`，然后 `pnpm build:client` 和 `pnpm exec wrangler deploy --secrets-file pki/secrets.json`。`pki/root-encrypted.key` 是 AES-256-CBC 加密 PKCS#8 根私钥；根私钥不包含在上传的 Secrets JSON 中。`pki/` 和 `.dev.vars` 都已忽略，Windows 文件权限请使用受限账户目录和 NTFS ACL 保护。
 
+忘记保存令牌时，可在 `/setup` 使用备份密码解密 `signcert-backup.json` 查看。也可以在项目目录执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-auth.ps1 -RecoverTokens`，输入初始化所用的原 `PKI_MASTER_KEY`。脚本只读远程 D1 的 `pki_config`，在本地解密并显示 `ADMIN_TOKEN` 和 `TSA_CUSTOM_TOKEN`，不修改数据库、不输出证书私钥或主密钥。主密钥通过隐藏输入和 stdin 传入，不写入命令参数或文件；令牌会显示在当前终端，请勿分享终端内容。没有匹配的主密钥便不能从 D1 恢复；不要修改 Worker 主密钥来尝试恢复。
+
 ## 自定义 Subject 字段
 
 `/setup` 可分别配置根 CA、签发 CA（issuer）、TSA 的完整 Subject；`/admin` 浏览器生成应用证书时也可配置；`/admin/tsa` 可加载、修改并重新签发完整 TSA Subject。展开“自定义完整 Subject”，按每行 `字段 = 值` 填写：

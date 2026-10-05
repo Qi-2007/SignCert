@@ -5,13 +5,14 @@ import { validateConfig } from '../src/storage';
 
 // Credentials arrive on stdin from Read-Host -AsSecureString, never argv or files.
 async function main(): Promise<void> {
+  const recover = process.argv.includes('--recover-tokens');
   let text = '';
   for await (const chunk of process.stdin) {
     text += chunk.toString();
     if (text.length > 4096) throw new Error('输入过长');
   }
   const input = JSON.parse(text) as {master:string;token:string};
-  if (typeof input.master !== 'string' || typeof input.token !== 'string') throw new Error('请通过 diagnose-auth.ps1 运行');
+  if (typeof input.master !== 'string' || (!recover && typeof input.token !== 'string')) throw new Error('请通过 diagnose-auth.ps1 运行');
   const key = await vaultKey(input.master.trim());
   const wrangler = fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js',import.meta.url));
   const result = spawnSync(process.execPath,[wrangler,'d1','execute','signcert','--remote','--command','SELECT encrypted,created_at FROM pki_config WHERE id=1','--json'],{encoding:'utf8',maxBuffer:1024*1024,stdio:['ignore','pipe','pipe']});
@@ -25,6 +26,11 @@ async function main(): Promise<void> {
   try { config = validateConfig(await decryptJSON(JSON.parse(row.encrypted),key,'signcert-pki-config-v1')); }
   catch { throw new Error('无法解密配置：输入的主密钥与这份 D1 配置不匹配，或配置已损坏。不要修改线上主密钥'); }
   console.log('远程 D1 初始化时间：'+row.created_at);
+  if (recover) {
+    console.log('管理令牌 ADMIN_TOKEN：'+config.ADMIN_TOKEN);
+    console.log('自定义时间戳令牌 TSA_CUSTOM_TOKEN：'+config.TSA_CUSTOM_TOKEN);
+    return;
+  }
   if (input.token === config.ADMIN_TOKEN) console.log('结果：管理令牌完全匹配。若网页仍返回 401，应排查实际请求、域名路由和部署版本。');
   else if (input.token.trim() === config.ADMIN_TOKEN) console.log('结果：管理令牌包含首尾空白；删除空白后重新输入。');
   else if (input.token.trim() === input.master.trim()) console.log('结果：输入的是初始化主密钥，不是管理令牌。');
