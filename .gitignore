@@ -1,0 +1,17 @@
+node_modules/
+.wrangler/
+dist/
+.dev.vars*
+pki/
+*.key
+*.pfx
+*.p12
+upstream/
+upstream-*
+generated/
+wrangler.toml
+signcert-backup*.json
+/signcert-*.sql
+*.pem
+*.log
+.DS_Store

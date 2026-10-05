@@ -1,0 +1,32 @@
+{
+  "name": "signcert-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:client": "esbuild src/setup-client.ts --bundle --format=iife --platform=browser --target=es2022 --minify --outfile=generated/setup-client.js.txt && esbuild src/admin-client.ts --bundle --format=iife --platform=browser --target=es2022 --minify --outfile=generated/admin-client.js.txt && esbuild src/tsa-client.ts --bundle --format=iife --platform=browser --target=es2022 --minify --outfile=generated/tsa-client.js.txt",
+    "dev": "pnpm build:client && wrangler dev",
+    "deploy": "pnpm build:client && wrangler deploy",
+    "build": "pnpm build:client && wrangler deploy --dry-run --outdir dist",
+    "check": "tsc --noEmit",
+    "test": "pnpm build && tsx --test test/*.test.ts",
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "csr": "tsx scripts/csr.ts",
+    "renew-service": "tsx scripts/renew-service.ts",
+    "db:local": "wrangler d1 migrations apply signcert --local",
+    "db:remote": "wrangler d1 migrations apply signcert --remote"
+  },
+  "dependencies": {
+    "asn1js": "^3.0.10",
+    "pkijs": "^3.4.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261004.1",
+    "@types/node": "^26.6.4",
+    "esbuild": "^0.28.2",
+    "miniflare": "5.20261001.0-alpha",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.147.0"
+  }
+}

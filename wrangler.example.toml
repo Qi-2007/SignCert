@@ -1,0 +1,33 @@
+name = "signcert"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+[[rules]]
+type = "Text"
+globs = ["**/*.txt"]
+fallthrough = true
+
+[vars]
+PUBLIC_URL = "https://cert.example.com"
+TSA_POLICY_OID = "1.3.6.1.4.1.55555.1.1"
+MAX_VALIDITY_DAYS = "365"
+TSA_FAKE = "true"
+# Set false to allow anonymous custom timestamps; true requires TSA_CUSTOM_TOKEN.
+TSA_CUSTOM_TOKEN_REQUIRED = "true"
+TSA_LEGACY = "true"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "signcert"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[routes]]
+pattern = "cert.example.com"
+custom_domain = true
+
+[observability]
+enabled = true
