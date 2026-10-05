@@ -1,5 +1,6 @@
 import { browserCSR, createPFX, validatePFXPassword } from './client-certificate';
 import { unpem } from './pki';
+import {bindSubjectEditor} from './subject-ui';
 
 const el = <T = HTMLElement>(id:string) => document.getElementById(id) as T;
 const input = (id:string) => el<HTMLInputElement>(id);
@@ -29,6 +30,7 @@ function mode():void {
   button('issue-button').textContent=browser?'生成并签发':'签发 CSR';
 }
 select('issue-mode').onchange=mode;
+bindSubjectEditor('leaf-subject','leaf-name');
 input('custom-validity').onchange=()=>{
   const custom=input('custom-validity').checked;el('custom-dates').hidden=!custom;input('days').disabled=custom;
   input('leaf-start').required=custom;input('leaf-end').required=custom;
@@ -75,7 +77,7 @@ el<HTMLFormElement>('issue').onsubmit=async event=>{
     const validity=input('custom-validity').checked?{notBefore:input('leaf-start').value,notAfter:input('leaf-end').value}:{days:Number(input('days').value)};
     const dnsNames=profile==='server'?{dnsNames:input('dns').value.split(',').map(s=>s.trim()).filter(Boolean)}:{};
     let csr=el<HTMLTextAreaElement>('csr').value;
-    if(browser){el('result').textContent='正在浏览器生成密钥和 CSR…';const generated=await browserCSR(input('leaf-name').value);keys=generated.keys;csr=generated.csr;}
+    if(browser){el('result').textContent='正在浏览器生成密钥和 CSR…';const generated=await browserCSR(input('leaf-name').value,el<HTMLTextAreaElement>('leaf-subject').value.trim());keys=generated.keys;csr=generated.csr;}
     el('result').textContent='正在签发证书…';
     const issued=await api<Issued>('/api/certificates','POST',{csr,profile,...validity,...dnsNames});
     current={issued,key:keys?.privateKey,downloaded:false};

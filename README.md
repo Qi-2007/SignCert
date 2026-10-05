@@ -77,6 +77,24 @@ pnpm exec wrangler secret put PKI_MASTER_KEY
 
 如果希望使用本地初始化脚本而非 Web 页面，原流程仍可用：设置 `ROOT_PASSPHRASE` 后执行 `pnpm bootstrap https://你的域名`，执行数据库迁移并导入 `pki/seed.sql`，然后 `pnpm build:client` 和 `pnpm exec wrangler deploy --secrets-file pki/secrets.json`。`pki/root-encrypted.key` 是 AES-256-CBC 加密 PKCS#8 根私钥；根私钥不包含在上传的 Secrets JSON 中。`pki/` 和 `.dev.vars` 都已忽略，Windows 文件权限请使用受限账户目录和 NTFS ACL 保护。
 
+## 自定义 Subject 字段
+
+`/setup` 可分别配置根 CA、签发 CA（issuer）、TSA 的完整 Subject；`/admin` 浏览器生成应用证书时也可配置；`/admin/tsa` 可加载、修改并重新签发完整 TSA Subject。展开“自定义完整 Subject”，按每行 `字段 = 值` 填写：
+
+```text
+Description = 皮卡丘公共服务测试根证书 RSA
+Description = Pikachu Public Test Root RSA
+E = testca@certs.us.kg
+CN = Pikachu Test CA RSA
+OU = Pikachu Certification Authority
+O = Pikachu Trust Network CA
+C = CN
+```
+
+允许重复 Description（OID 2.5.4.13），其他字段只允许一次，且必须包含 CN。C 是两位大写国家代码，编码为 PrintableString；E 是 ASCII 邮箱，编码为 IA5String，并同步加入邮箱 SAN；中文 Description、CN、O、OU 使用 UTF8String。完整 Subject 留空则保留原来的 CN 默认行为。完整字段优先于单独名称；应用 CSR 签发会校验并保留这些支持的字段，但仍不会复制 CSR 的扩展、权限或用途。TLS DNS 与邮箱 SAN 可同时存在。CN 限制 128 字符、O/OU 64、邮箱 254、每个 Description 1024，总文本 4096；最多 16 个属性。
+
+这些字段属于证书签名内容，不能修改已签发的证书。根与 issuer 自定义用于新系统初始化，现有系统不能直接改名；TSA 可在线重新签发替换，应用证书需重新签发并保存新的 CER/PFX。浏览器初始化生成参数为 `rootSubject`、`issuerSubject`、`tsaSubject`；TSA 重新签发 API 使用 `subjectDN`（多行文本）。未提供 Subject 参数的 TSA 续期保留原完整 Subject。
+
 ## 自定义证书有效期
 
 首次初始化的 `/setup` 页面可分别设置根 CA、签发 CA 的生效与到期时间；默认仍为当前时间前 1 分钟开始、根 CA 3650 天、签发 CA 1825 天。日期输入按 **UTC** 处理，例如北京时间 `2020-01-01 08:00:00` 应填 `2020-01-01 00:00:00`。签发 CA 必须位于根 CA 有效期内，且两张 CA 均需覆盖当前时间以启用在线服务。生成或恢复备份后页面显示实际证书日期供核对。已有证书的日期是签名内容，不能原地修改；此设置用于生成新证书，不会覆盖已初始化的 CA。

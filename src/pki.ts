@@ -103,7 +103,10 @@ export async function makeCert(opts: MakeCert): Promise<p.Certificate> {
   ];
   const purposes: Partial<Record<Profile, string>> = { 'code-signing': '1.3.6.1.5.5.7.3.3', server: '1.3.6.1.5.5.7.3.1', client: '1.3.6.1.5.5.7.3.2', tsa: OID.tsa, ocsp: OID.ocsp };
   if (purposes[opts.profile]) c.extensions.push(ext('2.5.29.37', new p.ExtKeyUsage({ keyPurposes: [purposes[opts.profile]!] }).toSchema(), opts.profile === 'tsa'));
-  if (opts.profile === 'server') c.extensions.push(ext('2.5.29.17', new p.GeneralNames({ names: dnsNames(opts.dnsNames).map(value => new p.GeneralName({ type: 2, value })) }).toSchema()));
+  const alternativeNames=opts.profile==='server'?dnsNames(opts.dnsNames).map(value=>new p.GeneralName({type:2,value})):[];
+  const email=opts.subject.typesAndValues.find(v=>v.type==='1.2.840.113549.1.9.1');
+  if(email&&email.value instanceof a.IA5String)alternativeNames.push(new p.GeneralName({type:1,value:email.value.valueBlock.value}));
+  if(alternativeNames.length)c.extensions.push(ext('2.5.29.17',new p.GeneralNames({names:alternativeNames}).toSchema()));
   if (opts.profile === 'ocsp') c.extensions.push(ext('1.3.6.1.5.5.7.48.1.5', new a.Null()));
   if (opts.publicURL && opts.issuer && opts.profile !== 'issuer') {
     c.extensions.push(ext('1.3.6.1.5.5.7.1.1', new p.InfoAccess({ accessDescriptions: [

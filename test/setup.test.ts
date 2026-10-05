@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { X509Certificate, createPrivateKey, createPublicKey } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { browserCSR, createPFX } from '../src/client-certificate';
+import {subjectText,subjectFromText} from '../src/subject';
 import { Miniflare, convertV4MiniflareOptions, type V4ModuleDefinition } from 'miniflare';
 import { workerModules } from './worker-modules';
 import { generateInitialization, initializationValidity, parseCertificateDate, type InitializationResult } from '../src/initialize';
@@ -14,6 +15,7 @@ const master = 'abcdef01'.repeat(8), backupPassword = 'integration-backup-passwo
 let mf: Miniflare, db: D1Database, pending: InitializationResult, directory: string, modules: V4ModuleDefinition[];
 let exportedPFX: ArrayBuffer, exportedCertificate: string;
 const exportPassword = '测试-PFX-password-2026';
+const fullSubject='Description = 皮卡丘公共服务测试根证书 RSA\nDescription = Pikachu Public Test Root RSA\nE = testca@certs.us.kg\nCN = Pikachu Test CA RSA\nOU = Pikachu Certification Authority\nO = Pikachu Trust Network CA\nC = CN';
 function options(key = master, maxValidityDays = '365', customTokenRequired = 'true', customTimeEnabled = 'true') {
   return convertV4MiniflareOptions({ modules, compatibilityDate: '2026-10-01', compatibilityFlags: ['nodejs_compat'],
     bindings: { PKI_MASTER_KEY: key, PUBLIC_URL: 'https://pki.example.com', TSA_POLICY_OID: '1.3.6.1.4.1.55555.1.1', MAX_VALIDITY_DAYS: maxValidityDays, TSA_FAKE: customTimeEnabled, TSA_CUSTOM_TOKEN_REQUIRED:customTokenRequired, TSA_LEGACY: 'true' },
@@ -28,6 +30,7 @@ before(async () => {
     const sql = (await readFile(file, 'utf8')).replace(/^--.*$/gm,''); await db.batch(sql.split(';').filter(v => v.trim()).map(v => db.prepare(v)));
   }
   pending = await generateInitialization({publicURL:'https://pki.example.com',name:'Web Test',password:backupPassword,
+    rootSubject:fullSubject,issuerSubject:fullSubject.replace('CN = Pikachu Test CA RSA','CN = Pikachu Issuing CA RSA'),tsaSubject:fullSubject.replace('CN = Pikachu Test CA RSA','CN = Pikachu TSA RSA'),
     rootNotBefore:'2010-01-01T00:00:00',rootNotAfter:'2080-01-01T00:00:00Z',issuerNotBefore:'2020-01-01T00:00:00',issuerNotAfter:'2060-01-01T00:00:00'});
 });
 after(async () => { await mf?.dispose(); if (directory) await rm(directory,{recursive:true,force:true}); });
@@ -57,6 +60,9 @@ test('browser backup contains root private key, is authenticated encrypted, and 
   await assert.rejects(decryptBackup({...pending.backup,ciphertext:pending.backup.ciphertext.replace(/^./,pending.backup.ciphertext[0]==='A'?'B':'A')},backupPassword));
 });
 test('custom CA dates survive X509 encoding including GeneralizedTime after 2050',async () => {
+  assert.equal(subjectText(cert(pending.config.ROOT_CERT).subject),fullSubject);
+  assert.equal(subjectText(cert(pending.config.CA_CERT).subject),fullSubject.replace('CN = Pikachu Test CA RSA','CN = Pikachu Issuing CA RSA'));
+  assert.equal(subjectText(cert(pending.config.TSA_CERT).subject),fullSubject.replace('CN = Pikachu Test CA RSA','CN = Pikachu TSA RSA'));
   const root = new X509Certificate(pending.config.ROOT_CERT), issuer = new X509Certificate(pending.config.CA_CERT);
   assert.equal(new Date(root.validFrom).toISOString(),'2010-01-01T00:00:00.000Z');
   assert.equal(new Date(root.validTo).toISOString(),'2080-01-01T00:00:00.000Z');
@@ -127,7 +133,7 @@ test('initialized service survives Worker restart, issues certificates and keeps
 });
 test('leaf issuance preserves exact custom dates for all profiles and enforces validity bounds',async () => {
   const keys = await rsaKeys(); const publicKey = new p.PublicKeyInfo(); await publicKey.importKey(keys.publicKey);
-  const csr = new p.CertificationRequest({version:0,subject:cn('Custom Dates Leaf'),subjectPublicKeyInfo:publicKey}); await csr.sign(keys.privateKey,'SHA-256');
+  const csr = new p.CertificationRequest({version:0,subject:subjectFromText(fullSubject),subjectPublicKeyInfo:publicKey}); await csr.sign(keys.privateKey,'SHA-256');
   const request = pem(csr.toSchema().toBER(false),'CERTIFICATE REQUEST');
   const issue = (input:Record<string,unknown>) => mf.dispatchFetch('https://pki.example.com/api/certificates',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+pending.config.ADMIN_TOKEN},body:JSON.stringify({csr:request,profile:'code-signing',...input})});
   for (const [profile,start,end] of [['code-signing','2020-01-01T00:00:00Z','2020-04-01T00:00:00Z'],['server','2051-01-01T00:00:00','2051-04-01T00:00:00'],['client','2027-01-01T00:00:00','2027-04-01T00:00:00']]) {
@@ -135,6 +141,8 @@ test('leaf issuance preserves exact custom dates for all profiles and enforces v
     assert.equal(response.status,201,await response.clone().text());
     const value = await response.json() as {certificate:string;notBefore:string;notAfter:string};
     const certificate = new X509Certificate(value.certificate);
+    assert.equal(subjectText(cert(value.certificate).subject),fullSubject);
+    assert.ok(certificate.subjectAltName!.includes('email:testca@certs.us.kg'));
     assert.equal(new Date(certificate.validFrom).toISOString(),parseCertificateDate(start).toISOString());
     assert.equal(new Date(certificate.validTo).toISOString(),parseCertificateDate(end).toISOString());
     assert.equal(value.notBefore,new Date(certificate.validFrom).toISOString());
@@ -238,12 +246,13 @@ test('TSA configuration replaces the active key with custom dates and preserves 
     {subject:''},{subject:123},{TSA_KEY:'unexpected'},{days:7300},
   ]) assert.equal((await renew(input)).status,400);
   assert.equal((await db.prepare('SELECT encrypted FROM pki_config WHERE id=1').first<{encrypted:string}>())!.encrypted,before.encrypted);
-  const response=await renew({subject:'Historical Timestamp Authority',notBefore:'2020-01-01T00:00:00',notAfter:'2050-01-01T00:00:00',expectedSerial:previous.serial});
+  const response=await renew({subjectDN:fullSubject.replace('CN = Pikachu Test CA RSA','CN = Historical Timestamp Authority'),notBefore:'2020-01-01T00:00:00',notAfter:'2050-01-01T00:00:00',expectedSerial:previous.serial});
   assert.equal(response.status,201,await response.clone().text());
   const issued=await response.json() as {serial:string;certificate:string;notBefore:string;notAfter:string};
   assert.equal(issued.notBefore,'2020-01-01T00:00:00.000Z');assert.equal(issued.notAfter,'2050-01-01T00:00:00.000Z');
   assert.notEqual(issued.serial,previous.serial);
   const tsa=cert(issued.certificate);
+  assert.equal(subjectText(tsa.subject),fullSubject.replace('CN = Pikachu Test CA RSA','CN = Historical Timestamp Authority'));
   assert.equal(tsa.extensions!.find(e=>e.extnID==='2.5.29.37')!.critical,true);
   assert.deepEqual(tsa.extensions!.find(e=>e.extnID==='2.5.29.37')!.parsedValue.keyPurposes,[OID.tsa]);
   const publicResult=await (await load()).text();assert.equal(publicResult.includes('PRIVATE KEY'),false);assert.equal(publicResult.includes(pending.config.ADMIN_TOKEN),false);
@@ -295,9 +304,10 @@ test('anonymous custom timestamps require explicit opt-in for both protocols and
 });
 
 test('browser CSR signs through Worker, CER downloads and encrypted PFX round-trip preserves leaf key and chain',async () => {
-  const generated = await browserCSR('Browser PFX Test');
+  const generated = await browserCSR('Browser PFX Test',fullSubject.replace('CN = Pikachu Test CA RSA','CN = Browser PFX Test'));
   const response = await mf.dispatchFetch('https://pki.example.com/api/certificates',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+pending.config.ADMIN_TOKEN},body:JSON.stringify({csr:generated.csr,profile:'code-signing',days:90})});
   assert.equal(response.status,201); const issued = await response.json() as {certificate:string;chain:string}; exportedCertificate=issued.certificate;
+  assert.equal(subjectText(cert(issued.certificate).subject),fullSubject.replace('CN = Pikachu Test CA RSA','CN = Browser PFX Test'));
   exportedPFX = await createPFX(issued.certificate,issued.chain,generated.keys.privateKey,exportPassword);
   const password = new TextEncoder().encode(exportPassword).buffer;
   const bundle = new p.PFX({schema:decode(exportedPFX)}); await bundle.parseInternalValues({password,checkIntegrity:true});

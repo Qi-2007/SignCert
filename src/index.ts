@@ -11,6 +11,7 @@ import { setupHTML } from './setup-ui';
 import setupScript from '../generated/setup-client.js.txt';
 import { runtimeEnv, setupStatus, initialize, renewService, AlreadyInitialized, InvalidServiceConfiguration, type ServiceOptions } from './storage';
 import { parseCertificateDate } from './initialize';
+import {validatedSubject,subjectText} from './subject';
 
 class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
 function json(value: unknown, status = 200): Response { return Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } }); }
@@ -79,14 +80,14 @@ async function issue(req: Request, env: Env): Promise<Response> {
       const curve = spki.algorithm.algorithmParams;
       if (!(curve instanceof a.ObjectIdentifier) || !['1.2.840.10045.3.1.7', '1.3.132.0.34'].includes(curve.valueBlock.toString())) throw new Error('Only P-256/P-384 supported');
     } else throw new Error('Only RSA or EC keys supported');
-    commonName(parsed.subject);
+    parsed.subject=validatedSubject(parsed.subject);
   } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : 'Invalid CSR'); }
   const ctx = await context(env);
   await assertServiceActive(env, ctx.ca);
   let certificate: p.Certificate;
   try {
     // CSR extensions are deliberately not copied. The authenticated caller supplies the allowed SANs.
-    certificate = await makeCert({ subject: cn(commonName(parsed.subject)), publicKey: parsed.subjectPublicKeyInfo, issuer: ctx.ca, signingKey: ctx.caKey, profile: profile as 'server' | 'client' | 'code-signing', days: Number(days), publicURL: env.PUBLIC_URL, dnsNames: profile === 'server' ? input.dnsNames as string[] : undefined,notBefore,notAfter });
+    certificate = await makeCert({ subject: parsed.subject, publicKey: parsed.subjectPublicKeyInfo, issuer: ctx.ca, signingKey: ctx.caKey, profile: profile as 'server' | 'client' | 'code-signing', days: Number(days), publicURL: env.PUBLIC_URL, dnsNames: profile === 'server' ? input.dnsNames as string[] : undefined,notBefore,notAfter });
   } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : 'Invalid certificate parameters'); }
   await env.DB.batch([insertCertificate(env.DB, certificate, profile as 'server' | 'client' | 'code-signing'), audit(env.DB, 'issue', serial(certificate.serialNumber), JSON.stringify({ profile }))]);
   return json({ serial: serial(certificate.serialNumber), certificate: certPEM(certificate), chain: certPEM(ctx.ca) + certPEM(ctx.root), notBefore:certificate.notBefore.value.toISOString(), notAfter: certificate.notAfter.value.toISOString() }, 201);
@@ -198,12 +199,12 @@ async function route(req: Request, env: Env): Promise<Response> {
       const ctx = await context(env);
       const currentSerial = serial(ctx.tsa.serialNumber);
       const row = await env.DB.prepare('SELECT status FROM certificates WHERE serial=?').bind(currentSerial).first<{status:string}>();
-      return json({mode:(await setupStatus(deploymentEnv)).mode,serial:currentSerial,subject:commonName(ctx.tsa.subject),status:row?.status ?? 'unknown',notBefore:ctx.tsa.notBefore.value.toISOString(),notAfter:ctx.tsa.notAfter.value.toISOString(),certificate:certPEM(ctx.tsa),chain:certPEM(ctx.ca)+certPEM(ctx.root),issuer:{subject:commonName(ctx.ca.subject),notBefore:ctx.ca.notBefore.value.toISOString(),notAfter:ctx.ca.notAfter.value.toISOString()},endpoint:env.PUBLIC_URL+'/tsa',customTimeEnabled:env.TSA_FAKE==='true',customTokenRequired:env.TSA_CUSTOM_TOKEN_REQUIRED!=='false',policy:env.TSA_POLICY_OID});
+      return json({mode:(await setupStatus(deploymentEnv)).mode,serial:currentSerial,subject:commonName(ctx.tsa.subject),subjectDN:subjectText(ctx.tsa.subject),status:row?.status ?? 'unknown',notBefore:ctx.tsa.notBefore.value.toISOString(),notAfter:ctx.tsa.notAfter.value.toISOString(),certificate:certPEM(ctx.tsa),chain:certPEM(ctx.ca)+certPEM(ctx.root),issuer:{subject:commonName(ctx.ca.subject),notBefore:ctx.ca.notBefore.value.toISOString(),notAfter:ctx.ca.notAfter.value.toISOString()},endpoint:env.PUBLIC_URL+'/tsa',customTimeEnabled:env.TSA_FAKE==='true',customTokenRequired:env.TSA_CUSTOM_TOKEN_REQUIRED!=='false',policy:env.TSA_POLICY_OID});
     }
     const renewal = path.match(/^\/api\/services\/(tsa|ocsp)\/renew$/);
     if (renewal && req.method === 'POST') {
       const input = await requestJSON(req);
-      const allowed = renewal[1] === 'tsa' ? ['subject','notBefore','notAfter','expectedSerial'] : [];
+      const allowed = renewal[1] === 'tsa' ? ['subject','subjectDN','notBefore','notAfter','expectedSerial'] : [];
       if (Object.keys(input).some(key=>!allowed.includes(key) || typeof input[key] !== 'string')) throw new HttpError(400,'Unexpected service configuration fields');
       try { return json(await renewService(deploymentEnv, renewal[1] as 'tsa' | 'ocsp',input as ServiceOptions),201); }
       catch (error) { if (error instanceof AlreadyInitialized) throw new HttpError(409,error.message); if (error instanceof InvalidServiceConfiguration) throw new HttpError(400,error.message); throw error; }

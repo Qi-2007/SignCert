@@ -1,10 +1,11 @@
 import { a, p, cn, cert, digest, pem, commonName } from './pki';
+import {subjectFromText} from './subject';
 
 export function validatePFXPassword(password: string): void {
   if (password.length < 12 || password.length > 1024 || /[\x00\uD800-\uDFFF]/.test(password)) throw new Error('PFX 密码需要 12–1024 个字符，不支持空字符或 Emoji');
 }
-export async function browserCSR(name: string): Promise<{keys:CryptoKeyPair;csr:string}> {
-  const subject = cn(name.trim());
+export async function browserCSR(name: string, subjectDN?:string): Promise<{keys:CryptoKeyPair;csr:string}> {
+  const subject = subjectDN?subjectFromText(subjectDN):cn(name.trim());
   const keys = await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:3072,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
   const publicKey = new p.PublicKeyInfo(); await publicKey.importKey(keys.publicKey);
   const request = new p.CertificationRequest({version:0,subject,subjectPublicKeyInfo:publicKey});

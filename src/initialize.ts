@@ -1,5 +1,6 @@
 import { cn, rsaKeys, makeCert, p, certPEM, pem, hex } from './pki';
 import { encryptBackup, type Backup } from './encryption';
+import { subjectFromText } from './subject';
 
 export const CONFIG_FIELDS = ['ROOT_CERT', 'CA_CERT', 'CA_KEY', 'TSA_CERT', 'TSA_KEY', 'OCSP_CERT', 'OCSP_KEY', 'ADMIN_TOKEN', 'TSA_CUSTOM_TOKEN'] as const;
 export type StoredConfig = Record<typeof CONFIG_FIELDS[number], string>;
@@ -7,6 +8,7 @@ export interface Initialization {
   publicURL: string; name: string; password: string;
   rootNotBefore?: string; rootNotAfter?: string;
   issuerNotBefore?: string; issuerNotAfter?: string;
+  rootSubject?:string;issuerSubject?:string;tsaSubject?:string;
   onProgress?: (message: string) => void;
 }
 export interface InitializationResult { config: StoredConfig; backup: Backup; rootCertificate: string; chain: string; }
@@ -42,13 +44,16 @@ export async function generateInitialization(opts: Initialization): Promise<Init
   const label = opts.name.trim(); cn(label);
   if (label.length > 90) throw new Error('名称不能超过 90 个字符');
   const validity = initializationValidity(opts);
+  const rootSubject=opts.rootSubject?subjectFromText(opts.rootSubject):cn(`${label} Root CA`);
+  const issuerSubject=opts.issuerSubject?subjectFromText(opts.issuerSubject):cn(`${label} Issuing CA`);
+  const tsaSubject=opts.tsaSubject?subjectFromText(opts.tsaSubject):cn(`${label} Timestamp Authority`);
   const pub = async (key: CryptoKey) => { const value = new p.PublicKeyInfo(); await value.importKey(key); return value; };
   opts.onProgress?.('正在生成根 CA…');
   const rootKeys = await rsaKeys();
-  const root = await makeCert({ subject: cn(`${label} Root CA`), publicKey: await pub(rootKeys.publicKey), signingKey: rootKeys.privateKey, profile: 'root', days: 3650, notBefore:validity.rootStart,notAfter:validity.rootEnd });
+  const root = await makeCert({ subject: rootSubject, publicKey: await pub(rootKeys.publicKey), signingKey: rootKeys.privateKey, profile: 'root', days: 3650, notBefore:validity.rootStart,notAfter:validity.rootEnd });
   opts.onProgress?.('正在生成签发 CA…');
   const caKeys = await rsaKeys();
-  const ca = await makeCert({ subject: cn(`${label} Issuing CA`), publicKey: await pub(caKeys.publicKey), issuer: root, signingKey: rootKeys.privateKey, profile: 'issuer', days: 1825,notBefore:validity.issuerStart,notAfter:validity.issuerEnd });
+  const ca = await makeCert({ subject: issuerSubject, publicKey: await pub(caKeys.publicKey), issuer: root, signingKey: rootKeys.privateKey, profile: 'issuer', days: 1825,notBefore:validity.issuerStart,notAfter:validity.issuerEnd });
   const config = {
     ROOT_CERT: certPEM(root), CA_CERT: certPEM(ca), CA_KEY: pem(await crypto.subtle.exportKey('pkcs8', caKeys.privateKey), 'PRIVATE KEY'),
     ADMIN_TOKEN: hex(crypto.getRandomValues(new Uint8Array(32))), TSA_CUSTOM_TOKEN: hex(crypto.getRandomValues(new Uint8Array(32))),
@@ -56,7 +61,7 @@ export async function generateInitialization(opts: Initialization): Promise<Init
   for (const service of ['tsa', 'ocsp'] as const) {
     opts.onProgress?.(`正在生成 ${service.toUpperCase()}…`);
     const keys = await rsaKeys();
-    const certificate = await makeCert({ subject: cn(`${label} ${service === 'tsa' ? 'Timestamp Authority' : 'OCSP Responder'}`), publicKey: await pub(keys.publicKey), issuer: ca, signingKey: caKeys.privateKey, profile: service, days: 365, publicURL });
+    const certificate = await makeCert({ subject: service === 'tsa' ? tsaSubject : cn(`${label} OCSP Responder`), publicKey: await pub(keys.publicKey), issuer: ca, signingKey: caKeys.privateKey, profile: service, days: 365, publicURL });
     config[service === 'tsa' ? 'TSA_CERT' : 'OCSP_CERT'] = certPEM(certificate);
     config[service === 'tsa' ? 'TSA_KEY' : 'OCSP_KEY'] = pem(await crypto.subtle.exportKey('pkcs8', keys.privateKey), 'PRIVATE KEY');
   }

@@ -57,6 +57,7 @@ el<HTMLFormElement>('generate').onsubmit = async event => {
   try {
     const result = await generateInitialization({ publicURL: input('url').value, name: input('name').value, password: input('password').value,
       rootNotBefore:input('root-start').value,rootNotAfter:input('root-end').value,issuerNotBefore:input('issuer-start').value,issuerNotAfter:input('issuer-end').value,
+      rootSubject:el<HTMLTextAreaElement>('root-subject').value.trim(),issuerSubject:el<HTMLTextAreaElement>('issuer-subject').value.trim(),tsaSubject:el<HTMLTextAreaElement>('tsa-subject').value.trim(),
       onProgress: message => { el('status').textContent = message; } });
     pending = result; rootPrivateKey = undefined; downloaded = false; input('saved').checked = false;
     showValidity(result.config);

@@ -1,6 +1,7 @@
 import { context, cert, insertCertificate, audit, assertServiceActive, rsaKeys, p, makeCert, cn, certPEM, pem, serial, commonName, type Env } from './pki';
 import { CONFIG_FIELDS, type StoredConfig, publicOrigin, parseCertificateDate } from './initialize';
 import { decryptJSON, encryptJSON, vaultKey, type EncryptedJSON } from './encryption';
+import {subjectFromText} from './subject';
 
 export const legacyConfigured = (env: Env): boolean => Boolean(env.ROOT_CERT || env.CA_CERT || env.CA_KEY);
 const vaultAAD = 'signcert-pki-config-v1';
@@ -55,7 +56,7 @@ export async function initialize(env: Env, input: unknown): Promise<void> {
   resolved.delete(env);
 }
 
-export interface ServiceOptions {subject?:string;notBefore?:string;notAfter?:string;expectedSerial?:string}
+export interface ServiceOptions {subject?:string;subjectDN?:string;notBefore?:string;notAfter?:string;expectedSerial?:string}
 export class InvalidServiceConfiguration extends Error {}
 export async function renewService(env: Env, service: 'tsa' | 'ocsp', options:ServiceOptions = {}): Promise<{serial:string;certificate:string;chain:string;notBefore:string;notAfter:string}> {
   if (legacyConfigured(env)) throw new AlreadyInitialized('Secrets mode uses the offline renew-service script');
@@ -68,9 +69,11 @@ export async function renewService(env: Env, service: 'tsa' | 'ocsp', options:Se
   if (options.expectedSerial !== undefined && options.expectedSerial !== serial(previous.serialNumber)) throw new AlreadyInitialized('当前服务证书已改变，请重新加载后再签发');
   let notBefore:Date|undefined, notAfter:Date|undefined;
   const subject = options.subject ?? commonName(previous.subject);
+  let distinguishedName=previous.subject;
   try {
     if (!subject.trim() || subject !== subject.trim() || subject.length > 128) throw new Error('证书名称需要 1–128 个字符，且不能包含首尾空格');
     cn(subject);
+    distinguishedName=options.subjectDN?subjectFromText(options.subjectDN):options.subject!==undefined?cn(subject):previous.subject;
     if (options.notBefore !== undefined || options.notAfter !== undefined) {
       if (typeof options.notBefore !== 'string' || typeof options.notAfter !== 'string') throw new Error('请同时填写生效与到期时间');
       notBefore = parseCertificateDate(options.notBefore); notAfter = parseCertificateDate(options.notAfter);
@@ -81,7 +84,7 @@ export async function renewService(env: Env, service: 'tsa' | 'ocsp', options:Se
     }
   } catch (error) { throw new InvalidServiceConfiguration(error instanceof Error ? error.message : '服务证书配置无效'); }
   const keys = await rsaKeys(); const publicKey = new p.PublicKeyInfo(); await publicKey.importKey(keys.publicKey);
-  const certificate = await makeCert({subject:cn(subject),publicKey,issuer:ctx.ca,signingKey:ctx.caKey,profile:service,days:365,publicURL:env.PUBLIC_URL,notBefore,notAfter});
+  const certificate = await makeCert({subject:distinguishedName,publicKey,issuer:ctx.ca,signingKey:ctx.caKey,profile:service,days:365,publicURL:env.PUBLIC_URL,notBefore,notAfter});
   config[service === 'tsa' ? 'TSA_CERT' : 'OCSP_CERT'] = certPEM(certificate);
   config[service === 'tsa' ? 'TSA_KEY' : 'OCSP_KEY'] = pem(await crypto.subtle.exportKey('pkcs8',keys.privateKey),'PRIVATE KEY');
   const next = JSON.stringify(await encryptJSON(config,key,vaultAAD)); const at = new Date().toISOString(); const id = serial(certificate.serialNumber);
