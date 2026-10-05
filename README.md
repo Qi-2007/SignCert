@@ -46,7 +46,7 @@ Web 模式的根私钥不会上传 Worker。`signcert-backup.json` 包含根私�
 
 ## 部署到 Cloudflare
 
-先确定长期使用的域名：证书签发后 AIA 和 CRL 地址已经写入，改变域名需要保留原地址或重新签发证书。
+先确定长期使用的域名：证书签发时会写入 AIA 和 CRL 地址，改变域名需要保留原地址或重新签发证书。
 
 ```powershell
 pnpm exec wrangler login
