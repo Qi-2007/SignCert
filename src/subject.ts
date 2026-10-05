@@ -1,12 +1,13 @@
 import {a,p,commonName} from './pki';
-const subjectOIDs:Record<string,string>={C:'2.5.4.6',O:'2.5.4.10',OU:'2.5.4.11',CN:'2.5.4.3',E:'1.2.840.113549.1.9.1',Description:'2.5.4.13'};
+const subjectOIDs:Record<string,string>={C:'2.5.4.6',L:'2.5.4.7',ST:'2.5.4.8',O:'2.5.4.10',OU:'2.5.4.11',CN:'2.5.4.3',E:'1.2.840.113549.1.9.1',Description:'2.5.4.13'};
 export function subjectFromText(text:string):p.RelativeDistinguishedNames {
   if(typeof text!=='string'||text.length>4096)throw new Error('Subject 最多 4096 个字符');
   const attributes:p.AttributeTypeAndValue[]=[],seen=new Set<string>();
   for(const line of text.split(/\r?\n/).map(v=>v.trim()).filter(Boolean)) {
-    const match=line.match(/^(Description|E|CN|OU|O|C)\s*=\s*(.+)$/i);
-    if(!match)throw new Error('Subject 每行需为 Description/E/CN/OU/O/C = 值');
-    const key=Object.keys(subjectOIDs).find(v=>v.toLowerCase()===match[1].toLowerCase())!,value=match[2].trim();
+    const match=line.match(/^(Description|E|CN|OU|O|L|S|ST|C)\s*=\s*(.+)$/i);
+    if(!match)throw new Error('Subject 每行需为 Description/E/CN/OU/O/L/S/ST/C = 值');
+    const field=match[1].toUpperCase()==='S'?'ST':match[1];
+    const key=Object.keys(subjectOIDs).find(v=>v.toLowerCase()===field.toLowerCase())!,value=match[2].trim();
     if(key!=='Description'&&seen.has(key))throw new Error(key+' 只能填写一次');
     seen.add(key);
     const limit=key==='Description'?1024:key==='E'?254:key==='CN'?128:64;

@@ -17,6 +17,25 @@ function download(value: string, name: string, type = 'application/json'): void 
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : '操作失败'; }
+function generationStatus(message: string, error = false): void {
+  el('status').textContent = message;
+  const status = el('generate-status');
+  status.textContent = message; status.hidden = false;
+  status.dataset.error = String(error);
+}
+function validateGenerationForm(): boolean {
+  const fields = el<HTMLFormElement>('generate').querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea');
+  for (const field of fields) {
+    if (!field.validity.valid) {
+      const label = field.closest('label')?.firstChild?.textContent?.trim() ?? '表单字段';
+      generationStatus(`${label}：${field.validationMessage}`, true);
+      const details = field.closest('details'); if (details) details.open = true;
+      field.reportValidity();
+      return false;
+    }
+  }
+  return true;
+}
 function showValidity(config: StoredConfig): void {
   const root = cert(config.ROOT_CERT), issuer = cert(config.CA_CERT);
   el('validity-preview').textContent = '根证书：'+root.notBefore.value.toISOString()+' → '+root.notAfter.value.toISOString()+'\n签发 CA：'+issuer.notBefore.value.toISOString()+' → '+issuer.notAfter.value.toISOString();
@@ -51,22 +70,26 @@ async function checkStatus(): Promise<void> {
 }
 el<HTMLFormElement>('generate').onsubmit = async event => {
   event.preventDefault(); if (busy || initialized) return;
-  if (!/^[0-9a-fA-F]{64}$/.test(input('master').value)) { el('status').textContent = '主密钥应为 64 位十六进制，与 Cloudflare Secret 完全一致'; return; }
-  if (input('password').value !== input('password-confirm').value) { el('status').textContent = '两次备份密码不一致'; return; }
+  if (!validateGenerationForm()) return;
+  if (!/^[0-9a-fA-F]{64}$/.test(input('master').value)) { generationStatus('主密钥应为 64 位十六进制，与 Cloudflare Secret 完全一致', true); return; }
+  if (input('password').value !== input('password-confirm').value) { generationStatus('两次备份密码不一致', true); return; }
   busy = true; el<HTMLButtonElement>('generate-button').disabled = true; updateCommit();
+  el<HTMLButtonElement>('generate-button').textContent = '正在生成，请稍候…';
+  generationStatus('正在校验证书配置…');
   try {
     const result = await generateInitialization({ publicURL: input('url').value, name: input('name').value, password: input('password').value,
       rootNotBefore:input('root-start').value,rootNotAfter:input('root-end').value,issuerNotBefore:input('issuer-start').value,issuerNotAfter:input('issuer-end').value,
       rootSubject:el<HTMLTextAreaElement>('root-subject').value.trim(),issuerSubject:el<HTMLTextAreaElement>('issuer-subject').value.trim(),tsaSubject:el<HTMLTextAreaElement>('tsa-subject').value.trim(),
-      onProgress: message => { el('status').textContent = message; } });
+      onProgress: message => generationStatus(message) });
     pending = result; rootPrivateKey = undefined; downloaded = false; input('saved').checked = false;
     showValidity(result.config);
     el('complete').hidden = true;
     el('download-private-root').hidden = true; el('backup').hidden = false;
     input('password').value = ''; input('password-confirm').value = '';
-    el('status').textContent = '证书已生成，尚未上传。请先下载并保存加密备份。';
-  } catch (error) { el('status').textContent = errorMessage(error); }
-  finally { busy = false; el<HTMLButtonElement>('generate-button').disabled = false; updateCommit(); }
+    generationStatus('证书已生成，尚未上传。请先下载并保存加密备份。');
+    el('backup').scrollIntoView({block:'start',behavior:'smooth'});
+  } catch (error) { generationStatus(errorMessage(error), true); }
+  finally { busy = false; el<HTMLButtonElement>('generate-button').disabled = false; el<HTMLButtonElement>('generate-button').textContent = '生成证书与加密备份'; updateCommit(); }
 };
 el('download-backup').onclick = () => { if (!pending) return; download(JSON.stringify(pending.backup, null, 2), 'signcert-backup.json'); downloaded = true; updateCommit(); };
 el('download-root').onclick = () => { if (pending) download(pending.rootCertificate, 'signcert-root.pem', 'application/x-pem-file'); };

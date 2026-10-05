@@ -20,7 +20,7 @@ D1：加密服务配置、证书、永久撤销、审计、时间戳摘要、CRL
 Worker Secret：PKI_MASTER_KEY（初始化认证和配置解密）
 ```
 
-CA/TSA/OCSP 密钥使用 RSA-3072。叶证书接受 RSA-2048～4096（e=65537）或 EC P-256/P-384 CSR。默认签发 90 天，最大有效期由 `MAX_VALIDITY_DAYS` 配置（示例为 365 天）；到期时间受签发 CA 限制。CSR 必须通过签名验证；不复制 CSR 内的 CA/EKU/SAN 扩展，扩展由服务端用途模板生成，TLS DNS 名称由管理员显式指定。SAN 暂不支持 IP/邮箱/URI。
+CA/TSA/OCSP 密钥使用 RSA-3072。叶证书接受 RSA-2048～4096（e=65537）或 EC P-256/P-384 CSR。默认签发 90 天，最大有效期由 `MAX_VALIDITY_DAYS` 配置（示例为 365 天）；到期时间受签发 CA 限制。CSR 必须通过签名验证；不复制 CSR 内的 CA/EKU/SAN 扩展，扩展由服务端用途模板生成，TLS DNS 名称由管理员显式指定。SAN 暂不支持 IP/URI；Subject 中的 E 邮箱会同步加入邮箱 SAN。
 
 ## 本地启动（PowerShell）
 
@@ -88,10 +88,12 @@ E = testca@certs.us.kg
 CN = Pikachu Test CA RSA
 OU = Pikachu Certification Authority
 O = Pikachu Trust Network CA
+L = Guangzhou
+ST = Guangdong
 C = CN
 ```
 
-允许重复 Description（OID 2.5.4.13），其他字段只允许一次，且必须包含 CN。C 是两位大写国家代码，编码为 PrintableString；E 是 ASCII 邮箱，编码为 IA5String，并同步加入邮箱 SAN；中文 Description、CN、O、OU 使用 UTF8String。完整 Subject 留空则保留原来的 CN 默认行为。完整字段优先于单独名称；应用 CSR 签发会校验并保留这些支持的字段，但仍不会复制 CSR 的扩展、权限或用途。TLS DNS 与邮箱 SAN 可同时存在。CN 限制 128 字符、O/OU 64、邮箱 254、每个 Description 1024，总文本 4096；最多 16 个属性。
+允许重复 Description（OID 2.5.4.13），其他字段只允许一次，且必须包含 CN。C 是两位大写国家代码，编码为 PrintableString；E 是 ASCII 邮箱，编码为 IA5String，并同步加入邮箱 SAN；L 是城市/地区（OID 2.5.4.7），S / ST 是同一个州/省字段（OID 2.5.4.8），读回时统一显示 ST；不能同时填写 S 和 ST。中文 Description、CN、O、OU、L、ST 使用 UTF8String。完整 Subject 留空则保留原来的 CN 默认行为。完整字段优先于单独名称；应用 CSR 签发会校验并保留这些支持的字段，但仍不会复制 CSR 的扩展、权限或用途。TLS DNS 与邮箱 SAN 可同时存在。CN 限制 128 字符、O/OU/L/ST 64、邮箱 254、每个 Description 1024，总文本 4096；最多 16 个属性。
 
 这些字段属于证书签名内容，不能修改已签发的证书。根与 issuer 自定义用于新系统初始化，现有系统不能直接改名；TSA 可在线重新签发替换，应用证书需重新签发并保存新的 CER/PFX。浏览器初始化生成参数为 `rootSubject`、`issuerSubject`、`tsaSubject`；TSA 重新签发 API 使用 `subjectDN`（多行文本）。未提供 Subject 参数的 TSA 续期保留原完整 Subject。
 
