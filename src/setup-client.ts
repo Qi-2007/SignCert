@@ -9,6 +9,16 @@ let rootPrivateKey: string | undefined;
 let initialized = false, busy = false, downloaded = false;
 const defaultValidity = initializationValidity({});
 for (const [id,date] of [['root-start',defaultValidity.rootStart],['root-end',defaultValidity.rootEnd],['issuer-start',defaultValidity.issuerStart],['issuer-end',defaultValidity.issuerEnd]] as const) input(id).value = date.toISOString().slice(0,19);
+function syncTsaValidity(): void {
+  const inherit = input('tsa-inherit').checked;
+  for (const [tsa,issuer] of [['tsa-start','issuer-start'],['tsa-end','issuer-end']]) {
+    input(tsa).disabled = inherit;
+    if (inherit) input(tsa).value = input(issuer).value;
+  }
+}
+input('tsa-inherit').onchange = syncTsaValidity;
+for (const id of ['issuer-start','issuer-end']) input(id).addEventListener('input',syncTsaValidity);
+syncTsaValidity();
 
 function download(value: string, name: string, type = 'application/json'): void {
   const url = URL.createObjectURL(new Blob([value], { type }));
@@ -37,8 +47,8 @@ function validateGenerationForm(): boolean {
   return true;
 }
 function showValidity(config: StoredConfig): void {
-  const root = cert(config.ROOT_CERT), issuer = cert(config.CA_CERT);
-  el('validity-preview').textContent = '根证书：'+root.notBefore.value.toISOString()+' → '+root.notAfter.value.toISOString()+'\n签发 CA：'+issuer.notBefore.value.toISOString()+' → '+issuer.notAfter.value.toISOString();
+  const root = cert(config.ROOT_CERT), issuer = cert(config.CA_CERT), tsa = cert(config.TSA_CERT);
+  el('validity-preview').textContent = '根证书：'+root.notBefore.value.toISOString()+' → '+root.notAfter.value.toISOString()+'\n签发 CA：'+issuer.notBefore.value.toISOString()+' → '+issuer.notAfter.value.toISOString()+'\nTSA：'+tsa.notBefore.value.toISOString()+' → '+tsa.notAfter.value.toISOString();
 }
 function updateCommit(): void { el<HTMLButtonElement>('commit').disabled = initialized || busy || !pending || !downloaded || !input('saved').checked; }
 function credentials(config: StoredConfig): void {
@@ -79,6 +89,7 @@ el<HTMLFormElement>('generate').onsubmit = async event => {
   try {
     const result = await generateInitialization({ publicURL: input('url').value, name: input('name').value, password: input('password').value,
       rootNotBefore:input('root-start').value,rootNotAfter:input('root-end').value,issuerNotBefore:input('issuer-start').value,issuerNotAfter:input('issuer-end').value,
+      ...(input('tsa-inherit').checked ? {} : {tsaNotBefore:input('tsa-start').value,tsaNotAfter:input('tsa-end').value}),
       rootSubject:el<HTMLTextAreaElement>('root-subject').value.trim(),issuerSubject:el<HTMLTextAreaElement>('issuer-subject').value.trim(),tsaSubject:el<HTMLTextAreaElement>('tsa-subject').value.trim(),
       onProgress: message => generationStatus(message) });
     pending = result; rootPrivateKey = undefined; downloaded = false; input('saved').checked = false;

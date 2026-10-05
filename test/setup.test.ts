@@ -69,6 +69,29 @@ test('custom CA dates survive X509 encoding including GeneralizedTime after 2050
   assert.equal(new Date(issuer.validFrom).toISOString(),'2020-01-01T00:00:00.000Z');
   assert.equal(new Date(issuer.validTo).toISOString(),'2060-01-01T00:00:00.000Z');
   assert.equal(issuer.verify(root.publicKey),true);
+  const tsa = new X509Certificate(pending.config.TSA_CERT);
+  assert.equal(new Date(tsa.validFrom).toISOString(),new Date(issuer.validFrom).toISOString());
+  assert.equal(new Date(tsa.validTo).toISOString(),new Date(issuer.validTo).toISOString());
+  assert.equal(tsa.verify(issuer.publicKey),true);
+});
+
+test('setup custom TSA dates are encoded exactly and must remain active within issuer dates',async()=>{
+  const dates={rootNotBefore:'2010-01-01T00:00:00',rootNotAfter:'2080-01-01T00:00:00',issuerNotBefore:'2020-01-01T00:00:00',issuerNotAfter:'2060-01-01T00:00:00'};
+  const tsaDates={tsaNotBefore:'2022-11-03T21:14:19',tsaNotAfter:'2055-11-03T21:14:19'};
+  const generated=await generateInitialization({...dates,...tsaDates,publicURL:'https://pki.example.com',name:'Custom TSA Dates',password:backupPassword});
+  const tsa=new X509Certificate(generated.config.TSA_CERT),issuer=new X509Certificate(generated.config.CA_CERT);
+  assert.equal(new Date(tsa.validFrom).toISOString(),tsaDates.tsaNotBefore+'.000Z');
+  assert.equal(new Date(tsa.validTo).toISOString(),tsaDates.tsaNotAfter+'.000Z');
+  assert.equal(tsa.verify(issuer.publicKey),true);
+  const backup=await decryptBackup(generated.backup,backupPassword) as {config:Record<string,string>};
+  assert.equal(backup.config.TSA_CERT,generated.config.TSA_CERT);
+  const now=new Date('2026-10-05T08:00:00Z');
+  for(const invalid of [
+    {tsaNotBefore:'2019-01-01T00:00:00'}, {tsaNotAfter:'2061-01-01T00:00:00'},
+    {tsaNotBefore:'2027-01-01T00:00:00'}, {tsaNotAfter:'2025-01-01T00:00:00'},
+    {tsaNotBefore:'2030-01-01T00:00:00',tsaNotAfter:'2029-01-01T00:00:00'},
+    {tsaNotBefore:'2022-02-30T00:00:00'},
+  ])assert.throws(()=>initializationValidity({...dates,...invalid},now));
 });
 
 test('date validation rejects normalization, inverted intervals, out-of-chain and inactive CA dates',() => {

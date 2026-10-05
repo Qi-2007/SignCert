@@ -8,6 +8,7 @@ export interface Initialization {
   publicURL: string; name: string; password: string;
   rootNotBefore?: string; rootNotAfter?: string;
   issuerNotBefore?: string; issuerNotAfter?: string;
+  tsaNotBefore?: string; tsaNotAfter?: string;
   rootSubject?:string;issuerSubject?:string;tsaSubject?:string;
   onProgress?: (message: string) => void;
 }
@@ -21,7 +22,7 @@ export function parseCertificateDate(value: string): Date {
   if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() < 1 || date.toISOString() !== canonical + '.000Z') throw new Error('证书日期无效，请检查月份、日期与时间');
   return date;
 }
-export function initializationValidity(opts: Pick<Initialization,'rootNotBefore'|'rootNotAfter'|'issuerNotBefore'|'issuerNotAfter'>, now = new Date()) {
+export function initializationValidity(opts: Pick<Initialization,'rootNotBefore'|'rootNotAfter'|'issuerNotBefore'|'issuerNotAfter'|'tsaNotBefore'|'tsaNotAfter'>, now = new Date()) {
   const date = (value: string | undefined, fallback: number) => value ? parseCertificateDate(value) : new Date(Math.floor(fallback / 1000) * 1000);
   const rootStart = date(opts.rootNotBefore,now.getTime()-60000), rootEnd = date(opts.rootNotAfter,now.getTime()+3650*86400000);
   const issuerStart = date(opts.issuerNotBefore,Math.max(now.getTime()-60000,rootStart.getTime()));
@@ -29,7 +30,11 @@ export function initializationValidity(opts: Pick<Initialization,'rootNotBefore'
   if (rootStart >= rootEnd || issuerStart >= issuerEnd) throw new Error('生效时间必须早于到期时间');
   if (issuerStart < rootStart || issuerEnd > rootEnd) throw new Error('签发 CA 的有效期必须位于根证书有效期内');
   if (rootStart > now || issuerStart > now || rootEnd <= now || issuerEnd <= now) throw new Error('启用服务要求根证书与签发 CA 的有效期均覆盖当前 UTC 时间');
-  return {rootStart,rootEnd,issuerStart,issuerEnd};
+  const tsaStart = date(opts.tsaNotBefore,issuerStart.getTime()), tsaEnd = date(opts.tsaNotAfter,issuerEnd.getTime());
+  if (tsaStart >= tsaEnd) throw new Error('TSA 生效时间必须早于到期时间');
+  if (tsaStart < issuerStart || tsaEnd > issuerEnd) throw new Error('TSA 的有效期必须位于签发 CA 有效期内');
+  if (tsaStart > now || tsaEnd <= now) throw new Error('启用服务要求 TSA 的有效期覆盖当前 UTC 时间');
+  return {rootStart,rootEnd,issuerStart,issuerEnd,tsaStart,tsaEnd};
 }
 
 export function publicOrigin(value: string): string {
@@ -61,7 +66,8 @@ export async function generateInitialization(opts: Initialization): Promise<Init
   for (const service of ['tsa', 'ocsp'] as const) {
     opts.onProgress?.(`正在生成 ${service.toUpperCase()}…`);
     const keys = await rsaKeys();
-    const certificate = await makeCert({ subject: service === 'tsa' ? tsaSubject : cn(`${label} OCSP Responder`), publicKey: await pub(keys.publicKey), issuer: ca, signingKey: caKeys.privateKey, profile: service, days: 365, publicURL });
+    const certificate = await makeCert({ subject: service === 'tsa' ? tsaSubject : cn(`${label} OCSP Responder`), publicKey: await pub(keys.publicKey), issuer: ca, signingKey: caKeys.privateKey, profile: service, days: 365, publicURL,
+      ...(service === 'tsa' ? {notBefore:validity.tsaStart,notAfter:validity.tsaEnd} : {}) });
     config[service === 'tsa' ? 'TSA_CERT' : 'OCSP_CERT'] = certPEM(certificate);
     config[service === 'tsa' ? 'TSA_KEY' : 'OCSP_KEY'] = pem(await crypto.subtle.exportKey('pkcs8', keys.privateKey), 'PRIVATE KEY');
   }
